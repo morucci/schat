@@ -1,9 +1,12 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
-
+-- |
+-- Module      : Chat
+-- Description : A minimal WEB chat through WebSocket
+-- Copyright   : (c) Fabien Boucher, 2022
+-- License     : MIT
+-- Maintainer  : fabien.dot.boucher@gmail.com
+--
+-- This module is the implementation of simple WEB chat based
+-- on HTMX.
 module Chat where
 
 import Control.Concurrent.Async (concurrently_)
@@ -31,48 +34,62 @@ import Servant.HTML.Lucid (HTML)
 import Servant.XStatic
 import qualified XStatic
 import qualified XStatic.Htmx as XStatic
-import qualified XStatic.Hyperscript as XStatic
 import qualified XStatic.Tailwind as XStatic
 import Prelude
 
-hxWS, hS, hxSwapOOB :: Text -> Attribute
+-- | Some HTMX attribute definition for Lucid
+hxWS, hxSwapOOB :: Text -> Attribute
 hxWS = makeAttribute "hx-ws"
 hxSwapOOB = makeAttribute "hx-swap-oob"
-hS = makeAttribute "_"
 
-type SCHatAPIv1 =
+-- | The sChat Servant API definition
+type SChatAPIv1 =
   Get '[HTML] (Html ())
     :<|> "xstatic" :> Raw
-    :<|> "schat" :> "ws" :> WebSocket
+    :<|> "ws" :> WebSocket
 
-sChatServer :: SChatS -> Server SCHatAPIv1
+-- |
+--   Here is the definition of the Servant Handlers. sChatHTMLHandler is the
+--   entry point on "\/"". xstaticServant is bound to "\/xstatic" to serve static JS assets.
+--   wsChatHandler is bound to "\/ws" to serve the WebSocket.
+sChatServer :: SChatS -> Server SChatAPIv1
 sChatServer sChatS =
   pure sChatHTMLHandler
     :<|> xstaticServant xStaticFiles
     :<|> wsChatHandler sChatS
 
+-- | We need static assets HTMX and Tailwindcss
 xStaticFiles :: [XStatic.XStaticFile]
-xStaticFiles = [XStatic.htmx, XStatic.tailwind, XStatic.hyperscript]
+xStaticFiles = [XStatic.htmx, XStatic.tailwind]
 
 data EMNotice
-  = EMEnter UTCTime Text
-  | EMExit UTCTime Text
+  = -- | Member enter event
+    EMEnter UTCTime Text
+  | -- | Member exit event
+    EMExit UTCTime Text
 
 data Event
-  = EMessage Message
-  | EMembersRefresh [Text]
-  | EMemberNotice EMNotice
+  = -- | Message event
+    EMessage Message
+  | -- | Refresh members list event
+    EMembersRefresh [Text]
+  | -- |  Notice event
+    EMemberNotice EMNotice
 
 data Message = Message
-  { date :: UTCTime,
+  { -- | Message date
+    date :: UTCTime,
+    -- | Message author
     mLogin :: Text,
+    -- | Message content
     content :: Text
   }
   deriving (Show)
 
 data Client = Client
-  { cLogin :: Text,
-    conn :: WS.Connection,
+  { -- | Client login
+    cLogin :: Text,
+    -- | Queue of `Event` to send back to the client
     inputQ :: TBQueue Event
   }
 
@@ -85,10 +102,10 @@ newSChatS = do
   clients <- newTVar []
   pure $ SChatS clients
 
-addClient :: Text -> WS.Connection -> SChatS -> STM Client
-addClient name conn state = do
+addClient :: Text -> SChatS -> STM Client
+addClient name state = do
   q <- newTBQueue 10
-  let newClient = Client name conn q
+  let newClient = Client name q
   modifyTVar (clients state) $ \cls -> do
     cls <> [newClient]
   pure newClient
@@ -102,6 +119,11 @@ isClientExists :: Text -> SChatS -> STM Bool
 isClientExists cLogin' state = do
   cls <- readTVar $ clients state
   pure $ Prelude.any (\Client {cLogin} -> cLogin == cLogin') cls
+
+getClientsNames :: SChatS -> STM [Text]
+getClientsNames state = do
+  cls <- readTVar state.clients
+  pure $ map cLogin cls
 
 wsChatHandler :: SChatS -> WS.Connection -> Handler ()
 wsChatHandler state conn = do
@@ -121,10 +143,10 @@ wsChatHandler state conn = do
         putStrLn [i|Terminating connection due to #{show e}|]
         closeConnection
   where
-    handleConnection (Client myLogin _conn myInputQ) = do
-      updateChatMemberOnClients
+    handleConnection (Client myLogin myInputQ) = do
+      dispatchMembersRefresh
       date <- getCurrentTime
-      dispatchMemberNotice (EMEnter date myLogin)
+      dispatchToAll $ EMemberNotice (EMEnter date myLogin)
       concurrently_ handleR handleS
       where
         handleR = do
@@ -134,9 +156,9 @@ wsChatHandler state conn = do
             Left e -> do
               putStrLn [i|Terminating connection for #{myLogin} due to #{show e}|]
               atomically $ removeClient myLogin state
-              updateChatMemberOnClients
+              dispatchMembersRefresh
               date <- getCurrentTime
-              dispatchMemberNotice (EMExit date myLogin)
+              dispatchToAll $ EMemberNotice (EMExit date myLogin)
               closeConnection
           where
             handleR' = do
@@ -145,10 +167,7 @@ wsChatHandler state conn = do
               case extractMessage wsD "chatInputMessage" of
                 Just inputMsg -> do
                   now <- getCurrentTime
-                  atomically $ do
-                    cls <- readTVar state.clients
-                    forM_ cls $ \c -> do
-                      writeTBQueue c.inputQ $ EMessage (Message now myLogin inputMsg)
+                  dispatchToAll $ EMessage (Message now myLogin inputMsg)
                 Nothing -> pure ()
         handleS = forever handleS'
           where
@@ -179,16 +198,15 @@ wsChatHandler state conn = do
                   EMEnter date uLogin -> div_ [] $ [i|#{formatDate date} - #{uLogin} entered the channel|]
                   EMExit date uLogin -> div_ [] $ [i|#{formatDate date} - #{uLogin} exited the channel|]
 
-        dispatchMemberNotice :: EMNotice -> IO ()
-        dispatchMemberNotice n = atomically $ do
-          cls <- readTVar state.clients
-          forM_ cls $ \c -> do
-            writeTBQueue c.inputQ $ EMemberNotice n
+        dispatchMembersRefresh = do
+          cls <- atomically $ getClientsNames state
+          dispatchToAll $ EMembersRefresh cls
 
-        updateChatMemberOnClients = atomically $ do
+        dispatchToAll :: Event -> IO ()
+        dispatchToAll event = atomically $ do
           cls <- readTVar state.clients
           forM_ cls $ \c -> do
-            writeTBQueue c.inputQ $ EMembersRefresh (map cLogin cls)
+            writeTBQueue c.inputQ event
 
     formatDate = formatTime defaultTimeLocale "%T"
 
@@ -199,7 +217,7 @@ wsChatHandler state conn = do
         exists <- isClientExists login state
         case exists of
           False -> do
-            newClient <- addClient login conn state
+            newClient <- addClient login state
             pure $ Just newClient
           True ->
             pure Nothing
@@ -256,6 +274,7 @@ wsChatHandler state conn = do
     chatInput :: Maybe Text -> Html ()
     chatInput loginM = do
       let inputFieldName = if isJust loginM then "chatInputMessage" else "chatInputName"
+      let inputFieldPlaceholder = if isJust loginM then "Enter a message" else "Enter your name"
       form_ [hxWS "send:submit", id_ "chatroom-input", class_ "mx-2 bg-purple-200 rounded-lg"] $ do
         span_ $ do
           maybe (span_ [] "") (\login -> span_ [class_ "pl-1 pr-2"] $ toHtml login) loginM
@@ -264,7 +283,7 @@ wsChatHandler state conn = do
               class_ "text-sm rounded-lg bg-purple-50 border border-purple-300 focus:border-purple-400",
               name_ inputFieldName,
               id_ "chatroom-input-field",
-              placeholder_ "Type a message"
+              placeholder_ inputFieldPlaceholder
             ]
         script_ "htmx.find('#chatroom-input-field').focus()"
 
@@ -285,11 +304,11 @@ sChatHTMLHandler = do
       xstaticScripts xStaticFiles
       script_ [iii||]
     body_ $ do
-      div_ [class_ "container mx-auto", hxWS "connect:/schat/ws"] $
+      div_ [class_ "container mx-auto", hxWS "connect:/ws"] $
         div_ [id_ "schat"] ""
 
 sChatApp :: SChatS -> Wai.Application
-sChatApp sChatS = serve (Proxy @SCHatAPIv1) $ sChatServer sChatS
+sChatApp sChatS = serve (Proxy @SChatAPIv1) $ sChatServer sChatS
 
 runServer :: IO ()
 runServer = do

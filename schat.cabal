@@ -24,6 +24,7 @@ common common-options
                       , OverloadedRecordDot
                       , QuasiQuotes
                       , TypeOperators
+                      , TypeApplications
     ghc-options:      -Wall
                       -threaded
 
@@ -53,7 +54,6 @@ library
                     , warp
                     , websockets
                     , xstatic
-                    , xstatic-hyperscript
                     , xstatic-htmx
                     , xstatic-tailwind
     hs-source-dirs:   src
