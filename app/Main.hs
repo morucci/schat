@@ -1,7 +1,7 @@
 module Main where
 
-import Chat
+import Chat (runServer)
 import Prelude
 
 main :: IO ()
-main = Chat.main
+main = Chat.runServer
