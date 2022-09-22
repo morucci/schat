@@ -153,25 +153,51 @@ getClientsNames state = do
 wsChatHandler :: SChatS -> WS.Connection -> Handler ()
 wsChatHandler state conn = do
   liftIO $ WS.withPingThread conn 5 (pure ()) $ do
+    putStrLn [i|New connection ...|]
     -- Send the rest of WEB UI to the client
     WS.sendTextData conn $ renderBS renderSChat
     -- Wait for login
-    ncE <- tryAny $ handleWaitForLogin
-    case ncE of
-      Right (Just client) -> do
-        -- Replace the input login box with the input message box
-        WS.sendTextData conn $ renderInputChat client.cLogin
-        -- Start handling the acknowledged client
-        handleConnection client
-      Right Nothing -> do
-        -- Close the connection when a client already connected with same login
-        putStrLn "Client already exists - closing"
-        closeConnection
-      Left e -> do
-        -- If any synchronuous exception happen the we close the connection
-        putStrLn [i|Terminating connection due to #{show e}|]
-        closeConnection
+    handleWaitForLogin
   where
+    -- Loop until a client send an available login name, then process I/O
+    handleWaitForLogin = do
+      ncE <- tryAny waitForLogin
+      case ncE of
+        Right (Just client) -> do
+          -- Replace the input login box with the input message box
+          WS.sendTextData conn $ renderInputChat client.cLogin
+          -- Start handling the acknowledged client
+          handleConnection client
+        Right Nothing -> do
+          -- This login is used so send a notice
+          WS.sendTextData conn . renderBS $ do
+            div_ [id_ "chatroom-notices", hxSwapOOB "afterbegin"] $ do
+              div_ "This login is already used. Please choose another one."
+          -- Reset the input field
+          WS.sendTextData conn . renderBS $ chatInput Nothing
+          -- Loop to wait for a valid login
+          handleWaitForLogin
+        Left e -> do
+          -- If any synchronuous exception happen the we close the connection
+          putStrLn [i|Terminating connection due to #{show e}|]
+          closeConnection
+      where
+        waitForLogin = do
+          login <- waitForLoginPayload
+          putStrLn [i|Receiving login name: #{login}|]
+          -- In the STM transaction, if the login is free then
+          -- add the client to the state
+          atomically $ do
+            exists <- isClientExists login state
+            case exists of
+              False -> Just <$> addClient login state
+              True -> pure Nothing
+        waitForLoginPayload = do
+          -- Wait until the an input name
+          wsD <- WS.receiveDataMessage conn
+          case extractMessage wsD "chatInputName" of
+            Just login -> pure login
+            Nothing -> waitForLoginPayload
     handleConnection (Client myLogin myInputQ) = do
       -- Dispatch member refresh event to all clients
       dispatchMembersRefresh
@@ -269,25 +295,6 @@ wsChatHandler state conn = do
     -- Helper to format an UTCTime (a date)
     formatDate = formatTime defaultTimeLocale "%T"
 
-    -- Loop until a client send an available login name
-    handleWaitForLogin = do
-      login <- waitForLogin
-      putStrLn [i|Receiving connection: #{login}|]
-      -- In the STM transaction, if the login is free then
-      -- add the client to the state
-      atomically $ do
-        exists <- isClientExists login state
-        case exists of
-          False -> Just <$> addClient login state
-          True -> pure Nothing
-      where
-        waitForLogin = do
-          -- Wait until the an input name
-          wsD <- WS.receiveDataMessage conn
-          case extractMessage wsD "chatInputName" of
-            Just login -> pure login
-            Nothing -> waitForLogin
-
     -- Check for the data under a given key in
     -- the HTMX payload
     extractMessage dataMessage keyName =
@@ -363,6 +370,7 @@ wsChatHandler state conn = do
               id_ "chatroom-input-field",
               placeholder_ inputFieldPlaceholder
             ]
+        -- Ensure the field got the focus
         script_ "htmx.find('#chatroom-input-field').focus()"
 
 -- | The root handler called when a client connect to the chat app
