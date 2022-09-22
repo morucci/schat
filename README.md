@@ -3,6 +3,8 @@
 schat is a basic WEB chat written in Haskell, HTMX and tailwindcss.
 Its purpose is to be a playground around HTMX.
 
+<img src="assets/schat.png" width="70%" height="70%" />
+
 ## Start sChat
 
 ```
