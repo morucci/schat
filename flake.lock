@@ -1,0 +1,62 @@
+{
+  "nodes": {
+    "flake-utils": {
+      "locked": {
+        "lastModified": 1659877975,
+        "narHash": "sha256-zllb8aq3YO3h8B/U0/J1WBgAL8EX5yWf5pMj3G0NAmc=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "c0e246b9b83f637f4681389ecabcb2681b4f3af0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "hspkgs": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1662745498,
+        "narHash": "sha256-GY5rEv/lnSAL8DRM2Lsb8QD6IkzmXuorTdgpBvMPito=",
+        "owner": "podenv",
+        "repo": "hspkgs",
+        "rev": "70ebfaa3e643ce20fe8ff97c17693ceb4bfaa30d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "podenv",
+        "repo": "hspkgs",
+        "rev": "70ebfaa3e643ce20fe8ff97c17693ceb4bfaa30d",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1659891956,
+        "narHash": "sha256-ymyDKkXQs5Z9+ezMutHmnDqztYmDTFZEsFuaPeBzkMI=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "00d73d5385b63e868bd11282fb775f6fe4921fb5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "00d73d5385b63e868bd11282fb775f6fe4921fb5",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "hspkgs": "hspkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

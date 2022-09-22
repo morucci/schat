@@ -1,0 +1,7 @@
+cradle:
+  cabal:
+    - path: "src"
+      component: "lib:schat"
+
+    - path: "app/Main.hs"
+      component: "schat:exe:schat"
