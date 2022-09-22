@@ -240,7 +240,6 @@ wsChatHandler state conn = do
         handleS = forever handleS'
           where
             -- loop on handleS'
-
             handleS' = do
               -- Wait for an event in the input Queue
               event <- atomically $ readTBQueue myInputQ
