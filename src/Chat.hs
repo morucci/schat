@@ -156,18 +156,18 @@ wsChatHandler state conn = do
     putStrLn [i|New connection ...|]
     -- Send the rest of WEB UI to the client
     WS.sendTextData conn $ renderBS renderSChat
-    -- Wait for login
-    handleWaitForLogin
+    -- Handle the client
+    handleClient
   where
     -- Loop until a client send an available login name, then process I/O
-    handleWaitForLogin = do
+    handleClient = do
       ncE <- tryAny waitForLogin
       case ncE of
         Right (Just client) -> do
           -- Replace the input login box with the input message box
           WS.sendTextData conn $ renderInputChat client.cLogin
           -- Start handling the acknowledged client
-          handleConnection client
+          handleConnected client
         Right Nothing -> do
           -- This login is used so send a notice
           WS.sendTextData conn . renderBS $ do
@@ -176,12 +176,13 @@ wsChatHandler state conn = do
           -- Reset the input field
           WS.sendTextData conn . renderBS $ chatInput Nothing
           -- Loop to wait for a valid login
-          handleWaitForLogin
+          handleClient
         Left e -> do
           -- If any synchronuous exception happen the we close the connection
           putStrLn [i|Terminating connection due to #{show e}|]
           closeConnection
       where
+        waitForLogin :: IO (Maybe Client)
         waitForLogin = do
           login <- waitForLoginPayload
           putStrLn [i|Receiving login name: #{login}|]
@@ -192,13 +193,14 @@ wsChatHandler state conn = do
             case exists of
               False -> Just <$> addClient login state
               True -> pure Nothing
+        waitForLoginPayload :: IO Text
         waitForLoginPayload = do
           -- Wait until the an input name
           wsD <- WS.receiveDataMessage conn
           case extractMessage wsD "chatInputName" of
             Just login -> pure login
             Nothing -> waitForLoginPayload
-    handleConnection (Client myLogin myInputQ) = do
+    handleConnected (Client myLogin myInputQ) = do
       -- Dispatch member refresh event to all clients
       dispatchMembersRefresh
       date <- getCurrentTime
@@ -296,13 +298,14 @@ wsChatHandler state conn = do
 
     -- Check for the data under a given key in
     -- the HTMX payload
+    extractMessage :: WS.DataMessage -> Text -> Maybe Text
     extractMessage dataMessage keyName =
       case dataMessage of
         WS.Text bs _ -> do
           case bs ^? key keyName of
             Just (String m) -> Just m
             _ -> Nothing
-        _other -> Nothing
+        _ -> Nothing
 
     -- Properly close the WS
     closeConnection = do
@@ -358,7 +361,7 @@ wsChatHandler state conn = do
       let inputFieldName = if isJust loginM then "chatInputMessage" else "chatInputName"
       let inputFieldPlaceholder = if isJust loginM then "Enter a message" else "Enter your name"
       -- hx-ws attribute tells HTMX to send a payload on the WebSocket when the form is submitted
-      form_ [hxWS "send:submit", id_ "chatroom-input", class_ "mx-2 bg-purple-200 rounded-lg"] $ do
+      form_ [hxWS "send:submit", id_ "chatroom-input", hxSwapOOB "innerHTML", class_ "mx-2 bg-purple-200 rounded-lg"] $ do
         span_ $ do
           maybe (span_ [] "") (\login -> span_ [class_ "pl-1 pr-2"] $ toHtml login) loginM
           input_
