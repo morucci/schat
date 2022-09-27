@@ -161,8 +161,8 @@ wsChatHandler state conn = do
   where
     -- Loop until a client send an available login name, then process I/O
     handleClient = do
-      ncE <- tryAny waitForLogin
-      case ncE of
+      loginE <- tryAny waitForLogin
+      case loginE of
         Right (Just client) -> do
           -- Replace the input login box with the input message box
           WS.sendTextData conn $ renderInputChat client.cLogin
@@ -196,8 +196,8 @@ wsChatHandler state conn = do
         waitForLoginPayload :: IO Text
         waitForLoginPayload = do
           -- Wait until the an input name
-          wsD <- WS.receiveDataMessage conn
-          case extractMessage wsD "chatInputName" of
+          dataMessage <- WS.receiveDataMessage conn
+          case extractMessage dataMessage "chatInputName" of
             Just login -> pure login
             Nothing -> waitForLoginPayload
     handleConnected (Client myLogin myInputQ) = do
@@ -313,7 +313,7 @@ wsChatHandler state conn = do
       void $ WS.receiveDataMessage conn
 
     -- Helper to render the chat's input field
-    renderInputChat login = renderBS . chatInput $ Just login
+    renderInputChat = renderBS . chatInput . Just
 
     -- The WEB app UI
     -- It is important to notice that some HTML tags own an id attribute mainly
